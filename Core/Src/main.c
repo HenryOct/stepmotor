@@ -101,6 +101,8 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    HAL_GPIO_TogglePin(led_GPIO_Port, led_Pin);
+    HAL_Delay(3000);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -275,10 +277,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, direction_Pin|enable_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, direction_Pin|enable_Pin|led_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : direction_Pin enable_Pin */
-  GPIO_InitStruct.Pin = direction_Pin|enable_Pin;
+  /*Configure GPIO pins : direction_Pin enable_Pin led_Pin */
+  GPIO_InitStruct.Pin = direction_Pin|enable_Pin|led_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
