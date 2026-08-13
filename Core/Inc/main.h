@@ -65,8 +65,6 @@ void Error_Handler(void);
 #define step_pulse_GPIO_Port GPIOA
 #define enable_Pin GPIO_PIN_3
 #define enable_GPIO_Port GPIOB
-#define led_Pin GPIO_PIN_6
-#define led_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
