@@ -22,4 +22,5 @@
             "statusBarVisibility": "hidden",
         },
     },
+    "C_Cpp.default.compilerPath": "c:/ST/STM32CubeCLT_1.19.0/GNU-tools-for-STM32/bin/arm-none-eabi-g++.exe",
 }
