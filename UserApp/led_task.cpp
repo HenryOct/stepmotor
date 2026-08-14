@@ -1,12 +1,14 @@
-#include "FreeRTOS.h"
 #include "main.h"
-#include "stm32f1xx_hal.h"
+#include "cmsis_os.h"
+#include "uart_task.hpp"
 
-extern "C" void led_task()
+extern "C" void led_task(void const *argument)
 {
+  (void)argument;
+
   while (1)
   {
     HAL_GPIO_TogglePin(led_GPIO_Port, led_Pin);
-    HAL_Delay(100);
+    osDelay(led_get_toggle_period_ms());
   }
 }
