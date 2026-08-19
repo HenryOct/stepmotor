@@ -50,6 +50,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     UserApp/led_task.cpp
     UserApp/uart_task.cpp
+    UserApp/stepmotor_task.cpp
 )
 
 # Add include paths

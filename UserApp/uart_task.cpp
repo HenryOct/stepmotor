@@ -4,6 +4,7 @@
 #include "queue.h"
 #include <stdlib.h>
 #include <string.h>
+#include "stepmotor_task.hpp"
 #include "uart_task.hpp"
 
 extern UART_HandleTypeDef huart1;
@@ -13,7 +14,10 @@ namespace
     constexpr uint32_t kDefaultTogglePeriodMs = 500U;
     constexpr uint32_t kMinTogglePeriodMs = 10U;
     constexpr uint32_t kMaxTogglePeriodMs = 60000U;
-    constexpr uint32_t kUartRxQueueLength = 32U;
+    constexpr uint32_t kMinTimerPrescaler = 0U;
+    constexpr uint32_t kMaxTimerPrescaler = 65535U;
+    constexpr uint32_t kUartRxQueueLength = 128U;
+    constexpr uint32_t kUartTxTimeoutMs = 1000U;
 }
 
 static volatile uint32_t g_led_toggle_period_ms = kDefaultTogglePeriodMs;
@@ -41,10 +45,16 @@ extern "C" uint32_t led_get_toggle_period_ms(void)
 
 static void uart_send(const char *message)
 {
-    HAL_UART_Transmit(&huart1,
-                      reinterpret_cast<uint8_t *>(const_cast<char *>(message)),
-                      static_cast<uint16_t>(strlen(message)),
-                      HAL_MAX_DELAY);
+    const HAL_StatusTypeDef status = HAL_UART_Transmit(
+        &huart1,
+        reinterpret_cast<uint8_t *>(const_cast<char *>(message)),
+        static_cast<uint16_t>(strlen(message)),
+        kUartTxTimeoutMs);
+
+    if (status != HAL_OK)
+    {
+        (void)HAL_UART_AbortTransmit(&huart1);
+    }
 }
 
 extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -55,6 +65,10 @@ extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
 
     BaseType_t higher_priority_task_woken = pdFALSE;
+    /*
+     * Discard a byte if a burst fills the queue, but always rearm UART
+     * reception below so the interface can recover by itself.
+     */
     (void)xQueueSendFromISR(
         g_uart_rx_queue,
         &g_uart_rx_byte,
@@ -70,7 +84,12 @@ extern "C" void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     if (huart == &huart1)
     {
-        /* Recover from an overrun or other UART error. */
+        /*
+         * Abort the failed receive operation, clear the overrun flag, and
+         * start a fresh receive operation.
+         */
+        (void)HAL_UART_AbortReceive_IT(&huart1);
+        __HAL_UART_CLEAR_OREFLAG(&huart1);
         (void)HAL_UART_Receive_IT(&huart1, &g_uart_rx_byte, 1U);
     }
 }
@@ -91,14 +110,15 @@ extern "C" void uart_task(void const *argument)
     }
 
     (void)HAL_UART_Receive_IT(&huart1, &g_uart_rx_byte, 1U);
-    uart_send("\r\n请输入 LED 翻转间隔(ms)，范围 10~60000，例如：500\r\n");
+    uart_send("\r\nLED：输入 10~60000 后加 #，例如 500#\r\n");
+    uart_send("步进电机：输入 0~65535 后加 %，例如 40%\r\n");
 
     while (1)
     {
         /* No polling: this task sleeps until the RX interrupt adds a byte. */
         (void)xQueueReceive(g_uart_rx_queue, &received_byte, portMAX_DELAY);
 
-        if (received_byte == '#')
+        if (received_byte == '#' || received_byte == '%')
         {
             if (command_length == 0)
             {
@@ -107,18 +127,35 @@ extern "C" void uart_task(void const *argument)
 
             command[command_length] = '\0';
             char *end = nullptr;
-            unsigned long period = strtoul(command, &end, 10);
+            unsigned long value = strtoul(command, &end, 10);
 
-            if (*end == '\0' &&
-                period >= kMinTogglePeriodMs &&
-                period <= kMaxTogglePeriodMs)
+            if (received_byte == '#')
             {
-                led_set_toggle_period_ms(static_cast<uint32_t>(period));
-                uart_send("设置成功\r\n");
+                if (*end == '\0' &&
+                    value >= kMinTogglePeriodMs &&
+                    value <= kMaxTogglePeriodMs)
+                {
+                    led_set_toggle_period_ms(static_cast<uint32_t>(value));
+                    uart_send("LED 设置成功\r\n");
+                }
+                else
+                {
+                    uart_send("LED 输入无效，请输入 10~60000 之间的整数(ms)，并以 # 结尾\r\n");
+                }
             }
             else
             {
-                uart_send("输入无效，请输入 10~60000 之间的整数(ms)\r\n");
+                if (*end == '\0' &&
+                    value >= kMinTimerPrescaler &&
+                    value <= kMaxTimerPrescaler)
+                {
+                    stepmotor_set_prescaler(static_cast<uint32_t>(value));
+                    uart_send("步进电机 Prescaler 设置成功\r\n");
+                }
+                else
+                {
+                    uart_send("步进电机输入无效，请输入 0~65535 之间的整数，并以 % 结尾\r\n");
+                }
             }
 
             command_length = 0;
@@ -139,7 +176,8 @@ extern "C" void uart_task(void const *argument)
                 uart_send("输入过长，请重新输入\r\n");
             }
         }
-        else
+        else if ((received_byte != '\r' && received_byte != '\n') ||
+                 command_length != 0U)
         {
             command_length = 0;
             command[0] = '\0';

@@ -48,6 +48,7 @@ UART_HandleTypeDef huart1;
 osThreadId defaultTaskHandle;
 osThreadId LedHandle;
 osThreadId UARTHandle;
+osThreadId StepmotorHandle;
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -60,6 +61,7 @@ static void MX_USART1_UART_Init(void);
 void StartDefaultTask(void const * argument);
 extern void led_task(void const * argument);
 extern void uart_task(void const * argument);
+extern void stepmotor_task(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -133,6 +135,10 @@ int main(void)
   /* definition and creation of UART */
   osThreadDef(UART, uart_task, osPriorityLow, 0, 128);
   UARTHandle = osThreadCreate(osThread(UART), NULL);
+
+  /* definition and creation of Stepmotor */
+  osThreadDef(Stepmotor, stepmotor_task, osPriorityRealtime, 0, 128);
+  StepmotorHandle = osThreadCreate(osThread(Stepmotor), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
