@@ -1,5 +1,7 @@
 #include "main.h"
 #include "cmsis_os.h"
+#include "FreeRTOS.h"
+#include "queue.h"
 #include <stdlib.h>
 #include <string.h>
 #include "uart_task.hpp"
@@ -8,12 +10,15 @@ extern UART_HandleTypeDef huart1;
 
 namespace
 {
-constexpr uint32_t kDefaultTogglePeriodMs = 50U;
-constexpr uint32_t kMinTogglePeriodMs = 10U;
-constexpr uint32_t kMaxTogglePeriodMs = 60000U;
+    constexpr uint32_t kDefaultTogglePeriodMs = 500U;
+    constexpr uint32_t kMinTogglePeriodMs = 10U;
+    constexpr uint32_t kMaxTogglePeriodMs = 60000U;
+    constexpr uint32_t kUartRxQueueLength = 32U;
 }
 
 static volatile uint32_t g_led_toggle_period_ms = kDefaultTogglePeriodMs;
+static QueueHandle_t g_uart_rx_queue = nullptr;
+static uint8_t g_uart_rx_byte = 0U;
 
 extern "C" void led_set_toggle_period_ms(uint32_t period_ms)
 {
@@ -42,6 +47,34 @@ static void uart_send(const char *message)
                       HAL_MAX_DELAY);
 }
 
+extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart != &huart1 || g_uart_rx_queue == nullptr)
+    {
+        return;
+    }
+
+    BaseType_t higher_priority_task_woken = pdFALSE;
+    (void)xQueueSendFromISR(
+        g_uart_rx_queue,
+        &g_uart_rx_byte,
+        &higher_priority_task_woken);
+
+    /* Rearm the receiver so the next byte also generates an interrupt. */
+    (void)HAL_UART_Receive_IT(&huart1, &g_uart_rx_byte, 1U);
+
+    portYIELD_FROM_ISR(higher_priority_task_woken);
+}
+
+extern "C" void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart == &huart1)
+    {
+        /* Recover from an overrun or other UART error. */
+        (void)HAL_UART_Receive_IT(&huart1, &g_uart_rx_byte, 1U);
+    }
+}
+
 extern "C" void uart_task(void const *argument)
 {
     (void)argument;
@@ -50,14 +83,20 @@ extern "C" void uart_task(void const *argument)
     char command[12] = {};
     uint32_t command_length = 0;
 
+    g_uart_rx_queue = xQueueCreate(kUartRxQueueLength, sizeof(uint8_t));
+    if (g_uart_rx_queue == nullptr)
+    {
+        uart_send("UART 接收队列创建失败\r\n");
+        vTaskSuspend(nullptr);
+    }
+
+    (void)HAL_UART_Receive_IT(&huart1, &g_uart_rx_byte, 1U);
     uart_send("\r\n请输入 LED 翻转间隔(ms)，范围 10~60000，例如：500\r\n");
 
     while (1)
     {
-        if (HAL_UART_Receive(&huart1, &received_byte, 1, 20) != HAL_OK)
-        {
-            continue;
-        }
+        /* No polling: this task sleeps until the RX interrupt adds a byte. */
+        (void)xQueueReceive(g_uart_rx_queue, &received_byte, portMAX_DELAY);
 
         if (received_byte == '#')
         {
